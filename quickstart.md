@@ -49,5 +49,5 @@ After the Prism findings, give me the three changes that would reduce the most r
 Reply with:
 
 ```text
-Rerun the analysis. Your last answer was too generic. Use specific evidence from the artifact, classify each issue as fixable or structural, and name what your analysis did not examine.
+Correct the output once using the selected prompt’s format and operating boundaries. For discovery, return only the domain list. For analysis, cite evidence, separate observations from hypotheses, allow unknown classification or no supported findings, and name what was not examined.
 ```

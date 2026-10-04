@@ -1,7 +1,7 @@
 # Example: strategy or decision review
 
 ```text
-Use prism-3way on this proposal. Run independent WHERE, WHEN, and WHY analyses, then synthesize what only appears when those perspectives disagree.
+Use prism-3way on this proposal. Use WHERE, WHEN, and WHY as simulated perspectives, not independent evidence, then synthesize what only appears when those perspectives disagree.
 
 Proposal:
 [paste proposal here]

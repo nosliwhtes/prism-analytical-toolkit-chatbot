@@ -23,7 +23,7 @@ Upload:
 Then say:
 
 ```text
-Use the uploaded Prism prompt exactly as the analysis method. Analyze the uploaded artifact. End with concrete findings, severity, fixable-vs-structural classification, and what the analysis did not examine.
+Use the uploaded Prism prompt exactly as the analysis method. Use its output format and operating boundaries. For discovery, list domains only; for analysis, cite evidence, distinguish hypotheses and unknowns, and state what was not examined.
 ```
 
 ## Best default for work use

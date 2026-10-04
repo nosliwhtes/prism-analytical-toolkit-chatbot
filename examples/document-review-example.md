@@ -12,5 +12,5 @@ Expected output should include:
 - a generated lens specific to the SOP
 - specific findings tied to SOP steps
 - which issues are fixable wording/process gaps
-- which issues are structural trade-offs, such as speed vs verification
+- whether any structural trade-off is supported, or none established
 - a short action list

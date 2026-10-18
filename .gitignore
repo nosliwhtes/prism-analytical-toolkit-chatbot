@@ -2,3 +2,5 @@
 .prism-history.md
 .env
 *.log
+__pycache__/
+*.pyc

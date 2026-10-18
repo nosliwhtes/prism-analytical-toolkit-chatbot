@@ -5,7 +5,7 @@ If the chatbot supports file uploads, upload both the Prism prompt and the artif
 If the chatbot skips steps, say:
 
 ```text
-You skipped required Prism steps. Rerun from the beginning. First show the generated lens or operation, then execute it, then give findings with evidence, severity, and fixable-vs-structural classification.
+Your previous output missed the selected Prism prompt’s format. Correct it once using that prompt’s operating boundaries and output format. For prism-discover, return only the domain list; do not add a lens or findings. For analysis prompts, cite evidence and distinguish observations, hypotheses, and unknowns. Do not invent missing context.
 ```
 
-Smaller models often need shorter artifacts and stronger reminders to cite evidence.
+For long artifacts, provide relevant excerpts with enough context to assess each claim.

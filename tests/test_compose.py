@@ -2,6 +2,7 @@
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -218,6 +219,41 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(set(self.root.iterdir()), before)
         retry = self.run_cli("--artifact", self.artifact, "--output", output)
         self.assertEqual(retry.returncode, 0, retry.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX byte arguments")
+    def test_stdout_rejects_malformed_focus_before_writing(self):
+        run = subprocess.run([sys.executable, str(SCRIPT), "--artifact", str(self.artifact),
+                              "--focus", os.fsdecode(b"\xff")],
+                             cwd=self.root, capture_output=True, timeout=10)
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(run.stdout, b"")
+        self.assertNotIn(b"Traceback", run.stderr)
+
+    def test_stdout_is_utf8_even_with_a_different_stream_encoding(self):
+        self.artifact.write_text("café\n", encoding="utf-8")
+        environment = dict(os.environ, PYTHONIOENCODING="ascii:backslashreplace")
+        run = subprocess.run([sys.executable, str(SCRIPT), "--artifact", str(self.artifact)],
+                             cwd=self.root, env=environment, capture_output=True, timeout=10)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("A1:L1 | café", run.stdout.decode("utf-8"))
+
+    @unittest.skipUnless(shutil.which("git"), "Git ignore-rule integration")
+    def test_abandoned_staging_bundles_are_ignored(self):
+        repository = self.root / "repository"
+        repository.mkdir()
+        environment = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+        subprocess.run(["git", "init", "--quiet", str(repository)],
+                       env=environment, check=True, capture_output=True)
+        shutil.copyfile(ROOT / ".gitignore", repository / ".gitignore")
+        nested = repository / "nested"
+        nested.mkdir()
+        names = (".prism-bundle-synthetic.tmp", "nested/.prism-bundle-synthetic.tmp",
+                 "review-bundle.md")
+        for name in names:
+            (repository / name).write_text("HARMLESS SYNTHETIC BUNDLE\n")
+        run = subprocess.run(["git", "check-ignore", "--no-index", *names], cwd=repository,
+                             env=environment, capture_output=True, text=True, check=True)
+        self.assertEqual(run.stdout.splitlines(), list(names))
 
     @unittest.skipUnless(sys.platform == "linux", "Linux file-size resource limit probe")
     def test_failed_disk_write_leaves_no_output_and_can_retry(self):

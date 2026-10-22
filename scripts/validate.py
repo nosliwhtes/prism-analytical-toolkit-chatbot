@@ -2,6 +2,7 @@
 """Offline prompt-contract and local Markdown file-link checks; not model evaluation."""
 import argparse
 import json
+import os
 import re
 import stat
 from pathlib import Path
@@ -197,8 +198,7 @@ def local_link_exists(root, parts):
             metadata = current.lstat()
         except (FileNotFoundError, NotADirectoryError):
             return False
-        if (stat.S_ISLNK(metadata.st_mode) or
-                getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+        if linked_metadata(metadata):
             raise ValueError("symlink or reparse point in destination")
         if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
             raise ValueError("destination is not a regular file or directory")
@@ -207,8 +207,96 @@ def local_link_exists(root, parts):
     return True
 
 
+def linked_metadata(metadata):
+    return (stat.S_ISLNK(metadata.st_mode) or
+            getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def source_metadata(path):
+    """Check every component before traversing a local, stable source path."""
+    path = path.absolute()
+    if path.anchor.startswith(("//", "\\\\")):
+        raise ValueError("pack sources must use local paths")
+    current = Path(path.anchor)
+    metadata = current.lstat()
+    for part in path.parts[1:]:
+        if linked_metadata(metadata) or not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("unsafe source parent")
+        current = current / part
+        metadata = current.lstat()
+    if linked_metadata(metadata):
+        raise ValueError("symlink or reparse point in source")
+    return metadata
+
+
+def markdown_sources(root, errors):
+    """Inventory sources without following linked files or directory entries."""
+    files = {}
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            if not stat.S_ISDIR(source_metadata(directory).st_mode):
+                raise ValueError("source directory is not a directory")
+            with os.scandir(directory) as entries:
+                for entry in sorted(entries, key=lambda item: item.name):
+                    if entry.name == ".git":
+                        continue
+                    path = directory / entry.name
+                    name = path.relative_to(root).as_posix()
+                    try:
+                        # Non-Markdown regular files are not source inputs. Never
+                        # follow entries to decide whether to descend into them.
+                        if not (os.path.normcase(entry.name).endswith(".md") or entry.is_symlink() or
+                                entry.is_dir(follow_symlinks=False)):
+                            continue
+                        metadata = path.lstat()
+                        if linked_metadata(metadata):
+                            raise ValueError("linked source entry")
+                        if stat.S_ISDIR(metadata.st_mode):
+                            pending.append(path)
+                        elif stat.S_ISREG(metadata.st_mode):
+                            files[name] = path
+                        else:
+                            raise ValueError("non-regular source entry")
+                    except ValueError:
+                        errors.append({"path": name, "rule": "unsafe_source"})
+                    except OSError as exc:
+                        errors.append({"path": name, "rule": "unreadable_file", "detail": str(exc)})
+        except ValueError:
+            errors.append({"path": directory.relative_to(root).as_posix(), "rule": "unsafe_source"})
+        except OSError as exc:
+            errors.append({"path": directory.relative_to(root).as_posix(),
+                           "rule": "unreadable_file", "detail": str(exc)})
+    return files
+
+
+def read_markdown(path):
+    """Recheck components, then validate the descriptor before reading content.
+
+    POSIX also refuses a leaf symlink at open time. Windows relies on the
+    pre-open reparse checks; the selected tree must remain local and stable.
+    """
+    expected = source_metadata(path)
+    if not stat.S_ISREG(expected.st_mode):
+        raise ValueError("source is not a regular file")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags | getattr(os, "O_BINARY", 0))
+    try:
+        actual = os.fstat(fd)
+        if (linked_metadata(actual) or not stat.S_ISREG(actual.st_mode) or
+                (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino)):
+            raise ValueError("source changed or is not a regular file")
+        stream = os.fdopen(fd, "r", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+    with stream:
+        return stream.read()
+
+
 def validate(root):
-    root = Path(root)
+    root = Path(root).absolute()
     errors = []
     checked = 0
     texts = {}
@@ -217,25 +305,28 @@ def validate(root):
         name = path.relative_to(root).as_posix()
         if name not in texts:
             try:
-                texts[name] = path.read_text(encoding="utf-8")
+                texts[name] = read_markdown(path)
             except UnicodeError:
                 errors.append({"path": name, "rule": "invalid_utf8"})
+                texts[name] = None
+            except ValueError:
+                errors.append({"path": name, "rule": "unsafe_source"})
                 texts[name] = None
             except OSError as exc:
                 errors.append({"path": name, "rule": "unreadable_file", "detail": str(exc)})
                 texts[name] = None
         return texts[name]
 
-    names = set(PROMPTS + LENSES)
-    for directory in ("prompts", "reference-prisms"):
-        names.update(path.relative_to(root).as_posix() for path in (root / directory).rglob("*.md"))
+    files = markdown_sources(root, errors)
+    names = set(PROMPTS + LENSES) | {
+        name for name in files if Path(name).parts[0] in ("prompts", "reference-prisms")
+    }
     for name in sorted(names):
-        path = root / name
-        if not path.is_file():
+        if name not in files:
             errors.append({"path": name, "rule": "missing_prompt"})
             continue
         checked += 1
-        text = read(path)
+        text = read(files[name])
         if text is None:
             continue
         discovery = name == "prompts/prism-discover.md"
@@ -251,9 +342,7 @@ def validate(root):
                 errors.append({"path": name, "rule": "discovery_format"})
         if name.endswith("optimize.md") and not all(term in text for term in ("unmeasured", "Never invent timing", "source, units, workload, and method")):
             errors.append({"path": name, "rule": "measurement_provenance"})
-    for path in sorted(root.rglob("*.md")):
-        if ".git" in path.parts:
-            continue
+    for name, path in sorted(files.items()):
         text = read(path)
         if text is None:
             continue

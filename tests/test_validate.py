@@ -38,6 +38,111 @@ class ValidationTests(unittest.TestCase):
     def test_repository_passes(self):
         self.assertTrue(validator.validate(ROOT)["ok"])
 
+    def test_markdown_inventory_respects_platform_case_matching(self):
+        (self.root / "EXTRA.MD").write_text("[missing](missing.txt)\n")
+        # Emulate case normalization without claiming native Windows execution.
+        with patch.object(os.path, "normcase", lambda name: name.lower()):
+            errors = validator.validate(self.root)["errors"]
+        self.assertIn({"path": "EXTRA.MD", "rule": "broken_local_link", "detail": "missing.txt"},
+                      errors)
+
+    @unittest.skipUnless(os.name == "posix", "synthetic local symlinks")
+    def test_source_symlinks_are_not_opened_or_traversed(self):
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside)
+            (external / "source.md").write_text("[HARMLESS MARKER](missing.txt)\n")
+            leaf = self.root / "extra.md"
+            leaf.symlink_to(external / "source.md")
+            parent = self.root / "prompts"
+            shutil.rmtree(parent)
+            parent.symlink_to(external, target_is_directory=True)
+            original_open, original_scandir = os.open, os.scandir
+
+            def guarded_open(path, *args, **kwargs):
+                candidate = Path(path)
+                self.assertNotEqual(candidate, leaf, "source symlink was opened")
+                self.assertNotIn(parent, candidate.parents, "linked parent was followed")
+                return original_open(path, *args, **kwargs)
+
+            def guarded_scandir(path):
+                self.assertNotEqual(Path(path), parent, "linked directory was traversed")
+                return original_scandir(path)
+
+            with patch.object(os, "open", guarded_open), patch.object(os, "scandir", guarded_scandir):
+                errors = validator.validate(self.root)["errors"]
+            rejected = {e["path"] for e in errors if e["rule"] == "unsafe_source"}
+            self.assertTrue({"extra.md", "prompts"} <= rejected)
+            self.assertNotIn("broken_local_link", {e["rule"] for e in errors})
+
+    @unittest.skipUnless(os.name == "posix", "synthetic local symlinks")
+    def test_source_root_with_linked_ancestor_is_rejected(self):
+        with tempfile.TemporaryDirectory() as outside:
+            alias = Path(outside) / "alias"
+            alias.symlink_to(self.root.parent, target_is_directory=True)
+            with patch.object(os, "scandir", side_effect=AssertionError("unsafe root traversed")):
+                result = validator.validate(alias / self.root.name)
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe_source", {e["rule"] for e in result["errors"]})
+
+    def test_source_reparse_points_are_rejected_before_open_or_traversal(self):
+        leaf = self.root / "extra.md"
+        leaf.write_text("[HARMLESS MARKER](missing.txt)\n")
+        directory = self.root / "prompts"
+        original_lstat, original_open, original_scandir = Path.lstat, os.open, os.scandir
+
+        def guarded_lstat(path):
+            self.assertNotIn(directory, path.parents, "reparse directory metadata traversed")
+            if path in (leaf, directory):
+                mode = stat.S_IFDIR if path == directory else stat.S_IFREG
+                return SimpleNamespace(st_mode=mode, st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
+            return original_lstat(path)
+
+        def guarded_open(path, *args, **kwargs):
+            self.assertNotEqual(Path(path), leaf, "reparse file opened")
+            self.assertNotIn(directory, Path(path).parents, "reparse parent followed")
+            return original_open(path, *args, **kwargs)
+
+        def guarded_scandir(path):
+            self.assertNotEqual(Path(path), directory, "reparse directory traversed")
+            return original_scandir(path)
+
+        with patch.object(Path, "lstat", guarded_lstat), patch.object(os, "open", guarded_open), \
+                patch.object(os, "scandir", guarded_scandir):
+            errors = validator.validate(self.root)["errors"]
+        self.assertTrue({"extra.md", "prompts"} <=
+                        {e["path"] for e in errors if e["rule"] == "unsafe_source"})
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX named pipes")
+    def test_nonregular_markdown_is_rejected_without_opening(self):
+        fifo = self.root / "pipe.md"
+        os.mkfifo(fifo)
+        run = subprocess.run([sys.executable, str(ROOT / "scripts/validate.py"),
+                              "--root", str(self.root), "--json"],
+                             capture_output=True, text=True, timeout=3)
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertIn({"path": "pipe.md", "rule": "unsafe_source"},
+                      json.loads(run.stdout)["errors"])
+
+    def test_source_descriptor_is_checked_and_closed_on_rejection(self):
+        path = self.root / "extra.md"
+        path.write_text("HARMLESS TEST CONTENT\n")
+        metadata = path.stat()
+        cases = (
+            SimpleNamespace(st_mode=stat.S_IFREG,
+                            st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT),
+            SimpleNamespace(st_mode=stat.S_IFIFO),
+            SimpleNamespace(st_mode=stat.S_IFREG, st_dev=metadata.st_dev,
+                            st_ino=metadata.st_ino + 1),
+        )
+        for result in cases:
+            with self.subTest(metadata=result):
+                with patch.object(os, "fstat", return_value=result) as probe:
+                    with self.assertRaises(ValueError):
+                        validator.read_markdown(path)
+                fd = probe.call_args.args[0]
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+
     def test_missing_prompt(self):
         (self.root / "prompts/prism-scan.md").unlink()
         self.assertIn("missing_prompt", self.rules())
@@ -109,18 +214,18 @@ class ValidationTests(unittest.TestCase):
         # Pure path parsing establishes the Windows interpretation without
         # instantiating a WindowsPath or contacting any network filesystem.
         self.assertTrue(PureWindowsPath("//server.invalid/share/file.md").is_absolute())
-        original_stat = Path.stat
+        original_lstat = Path.lstat
         for target in targets:
             with self.subTest(target=target):
                 (self.root / "links.md").write_text(f"[docs]({target})\n")
-                approved = {self.root, *self.root.rglob("*")}
+                approved = {self.root, *self.root.parents, *self.root.rglob("*")}
 
-                def guarded_stat(path, *args, **kwargs):
+                def guarded_lstat(path):
                     if path not in approved:
                         self.fail(f"unapproved filesystem probe intercepted: {path}")
-                    return original_stat(path, *args, **kwargs)
+                    return original_lstat(path)
 
-                with patch.object(Path, "stat", guarded_stat):
+                with patch.object(Path, "lstat", guarded_lstat):
                     errors = validator.validate(self.root)["errors"]
                 self.assertEqual(errors, [{"path": "links.md", "rule": "unsafe_local_link",
                                            "detail": target}])
@@ -157,14 +262,14 @@ class ValidationTests(unittest.TestCase):
         target = self.root / "target.txt"
         target.write_text("harmless target")
         (self.root / "links.md").write_text("[docs](target.txt)\n")
-        original_stat = Path.stat
+        original_lstat = Path.lstat
 
-        def guarded_stat(path, *args, **kwargs):
+        def guarded_lstat(path):
             if path == target:
                 raise PermissionError("synthetic denied metadata access")
-            return original_stat(path, *args, **kwargs)
+            return original_lstat(path)
 
-        with patch.object(Path, "stat", guarded_stat):
+        with patch.object(Path, "lstat", guarded_lstat):
             errors = validator.validate(self.root)["errors"]
         self.assertEqual(errors, [{"path": "links.md", "rule": "unreadable_local_link",
                                    "detail": "target.txt"}])
@@ -179,15 +284,15 @@ class ValidationTests(unittest.TestCase):
             "[data bytes](data:application/octet-stream,%FF)\n"
             "[external controls](https://example.invalid/file%00%0A)\n"
         )
-        approved = {self.root, *self.root.rglob("*")}
-        original_stat = Path.stat
+        approved = {self.root, *self.root.parents, *self.root.rglob("*")}
+        original_lstat = Path.lstat
 
-        def guarded_stat(path, *args, **kwargs):
+        def guarded_lstat(path):
             if path not in approved:
                 self.fail(f"external destination probe intercepted: {path}")
-            return original_stat(path, *args, **kwargs)
+            return original_lstat(path)
 
-        with patch.object(Path, "stat", guarded_stat):
+        with patch.object(Path, "lstat", guarded_lstat):
             self.assertTrue(validator.validate(self.root)["ok"])
 
     @unittest.skipUnless(os.name == "posix", "synthetic local symlink fixtures")
@@ -203,36 +308,42 @@ class ValidationTests(unittest.TestCase):
                 "[leaf](alias.txt)\n[parent](alias-dir/target.txt)\n"
                 "[dot parent](alias-dir/../prompts/prism-scan.md)\n"
             )
-            original_stat = Path.stat
+            original_lstat = Path.lstat
 
-            def guarded_stat(path, *args, **kwargs):
-                if directory in path.parents or (path in (alias, directory) and
-                                                 kwargs.get("follow_symlinks", True)):
+            def guarded_lstat(path):
+                if directory in path.parents:
                     self.fail(f"following symlink probe intercepted: {path}")
-                return original_stat(path, *args, **kwargs)
+                return original_lstat(path)
 
-            with patch.object(Path, "stat", guarded_stat):
+            with patch.object(Path, "lstat", guarded_lstat):
                 errors = validator.validate(self.root)["errors"]
-            self.assertEqual([e["rule"] for e in errors], ["unsafe_local_link"] * 3)
+            self.assertEqual([e["rule"] for e in errors if e["path"] == "links.md"],
+                             ["unsafe_local_link"] * 3)
 
     def test_link_checks_reject_synthetic_windows_reparse_point(self):
         directory = self.root / "junction"
         directory.mkdir()
         (self.root / "links.md").write_text("[docs](junction/file.txt)\n")
-        original_stat = Path.stat
+        original_lstat = Path.lstat
 
-        def guarded_stat(path, *args, **kwargs):
+        def guarded_lstat(path):
             if directory in path.parents:
                 self.fail("reparse-point traversal intercepted")
             if path == directory:
-                self.assertFalse(kwargs.get("follow_symlinks", True))
                 return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755,
                                        st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
-            return original_stat(path, *args, **kwargs)
+            return original_lstat(path)
 
-        with patch.object(Path, "stat", guarded_stat):
+        with patch.object(Path, "lstat", guarded_lstat):
             errors = validator.validate(self.root)["errors"]
-        self.assertEqual([e["rule"] for e in errors], ["unsafe_local_link"])
+        self.assertEqual([e["rule"] for e in errors if e["path"] == "links.md"],
+                         ["unsafe_local_link"])
+
+    def test_target_mocks_support_direct_os_lstat_dispatch(self):
+        # Simulate CPython 3.14's dispatch, without claiming a native 3.14 run.
+        with patch.object(Path, "lstat", lambda path: os.lstat(path)):
+            self.test_unreadable_link_target_is_a_diagnostic()
+            self.test_link_checks_reject_synthetic_windows_reparse_point()
 
     def test_code_samples_are_not_links(self):
         (self.root / "links.md").write_text(

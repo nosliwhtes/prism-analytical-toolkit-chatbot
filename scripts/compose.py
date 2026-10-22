@@ -135,11 +135,13 @@ def main(argv=None):
         parser.error("--max-bytes must be positive")
     try:
         bundle = compose(args.prompt, args.artifact, args.context, args.focus, args.max_bytes)
+        data = bundle.encode("utf-8")  # Reject malformed arguments before either output path.
         if args.output:
             write_bundle(args.output, bundle)
             print(f"Created {args.output}", file=sys.stderr)
         else:
-            sys.stdout.write(bundle)
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
     return 0

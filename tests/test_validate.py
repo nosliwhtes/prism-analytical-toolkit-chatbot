@@ -1,8 +1,11 @@
 """Mutation checks: demonstrate detection without modifying the working pack."""
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import tempfile
+import subprocess
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +74,63 @@ class ValidationTests(unittest.TestCase):
         (self.root / "links.md").write_text("[missing](missing.md)\n[external](https://example.invalid)\n[anchor](#unknown)\n")
         result = validator.validate(self.root)
         self.assertEqual([e["detail"] for e in result["errors"]], ["missing.md"])
+
+    def test_titled_and_angle_links(self):
+        (self.root / "links.md").write_text(
+            '[docs](missing.md "Docs")\n[more](<also missing.md> \'More\')\n'
+        )
+        errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["detail"] for e in errors], ["missing.md", "also missing.md"])
+
+    def test_encoded_paths_and_balanced_parentheses(self):
+        (self.root / "a file(1).md").write_text("hello")
+        (self.root / "links.md").write_text(
+            '[a](a%20file(1).md#section "A")\n[b](<a file(1).md>)\n'
+            '[remote](//example.invalid/docs)\n'
+        )
+        self.assertTrue(validator.validate(self.root)["ok"])
+
+    def test_code_samples_are_not_links(self):
+        (self.root / "links.md").write_text(
+            '```text\n[example](missing.md)\n```\n'
+            '~~~md\n[example](missing2.md)\n~~~\n'
+            '`[example](missing3.md)` and ``[example](missing4.md)``\n'
+            '    [example](missing5.md)\n[real](missing6.md)\n'
+        )
+        errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["detail"] for e in errors], ["missing6.md"])
+
+    def test_invalid_utf8_is_a_diagnostic(self):
+        for name in ("prompts/prism-scan.md", "extra.md"):
+            with self.subTest(name=name):
+                path = self.root / name
+                original = path.read_bytes() if path.exists() else b""
+                path.write_bytes(b"\xff")
+                try:
+                    result = validator.validate(self.root)
+                except UnicodeError as exc:
+                    self.fail(f"validator crashed instead of reporting invalid UTF-8: {exc}")
+                self.assertIn({"path": name, "rule": "invalid_utf8"}, result["errors"])
+                path.write_bytes(original)
+
+    def test_new_prompts_are_not_silently_ignored(self):
+        (self.root / "prompts/prism-extra.md").write_text("No boundaries")
+        result = validator.validate(self.root)
+        self.assertTrue(any(e["path"] == "prompts/prism-extra.md" and
+                            e["rule"] == "missing_boundary" for e in result["errors"]))
+
+    def test_forced_tradeoff_is_detected(self):
+        path = self.root / "reference-prisms/deep_scan.md"
+        path.write_text(path.read_text() + "\nFind the fundamental trade-off the system is managing.")
+        self.assertIn("contradictory_mandate", self.rules())
+
+    def test_cli_reports_invalid_file_as_json(self):
+        (self.root / "bad.md").write_bytes(b"\xff")
+        run = subprocess.run([sys.executable, str(ROOT / "scripts/validate.py"),
+                              "--root", str(self.root), "--json"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertFalse(json.loads(run.stdout)["ok"])
 
 
 if __name__ == "__main__":

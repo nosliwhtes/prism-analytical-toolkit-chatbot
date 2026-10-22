@@ -11,4 +11,6 @@ python3 scripts/validate.py --json
 python3 -m unittest discover -s tests -v
 ```
 
-These check text contracts and local file links, not empirical model quality. Review the fixtures in `evaluation/README.md` when changing behavioral instructions. State whether an evaluation is a static review or an actual model run. No application build or type checker is applicable to the Markdown pack; use `python3 -m py_compile scripts/validate.py` for the maintenance script.
+These check text contracts, local file links, and the offline composer, not empirical model quality. Review the fixtures in `evaluation/README.md` when changing behavioral instructions. State whether an evaluation is a static review or an actual model run. No application build or type checker is applicable to the Markdown pack; use `python3 -m py_compile scripts/validate.py scripts/compose.py` for the maintenance scripts.
+
+Keep discovery domain-only, with a missing-artifact exception. Analysis output tables must include all Findings contract fields even when a lens adds specialized details. Keep source IDs/versions and retraction IDs intact; missing excerpt content is not evidence of system-wide absence. Preserve the no-install copy/paste path. The optional composer must stay offline, use only explicitly named UTF-8 inputs, enforce its byte limit, and refuse output overwrite. Never commit private source bundles or treat a hash as proof of truth.

@@ -12,6 +12,8 @@ Use the Prism Scan method on this artifact. Follow all steps. Do not give generi
 
 4. Paste your artifact.
 
+For several documents, label them A1, A2, etc., include versions when known, and state whether each is complete or an excerpt. Start with the [review request template](templates/review-request.md). For local text files, `python3 scripts/compose.py --artifact your-file.txt --output review-bundle.md` prepares the full Scan prompt plus source line labels and a content hash; paste or upload the resulting file. See [bundle options and limits](README.md#review-multiple-sources-reproducibly).
+
 ## Good artifacts to analyze
 
 - SOPs and work instructions
@@ -41,7 +43,7 @@ For every finding, cite the exact sentence, step, line, or assumption that suppo
 Ask for actionability:
 
 ```text
-After the Prism findings, give me the three changes that would reduce the most risk this week.
+After the Prism findings, give me up to three next actions tied to finding IDs, with a checkable success condition. Prioritize evidence collection when a hypothesis is not established.
 ```
 
 ## If the chatbot gets vague

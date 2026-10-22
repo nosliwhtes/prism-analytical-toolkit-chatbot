@@ -4,10 +4,13 @@ import argparse
 import json
 import re
 import stat
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
+WINDOWS_DEVICES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
+    f"{prefix}{digit}" for prefix in ("COM", "LPT") for digit in "123456789¹²³"
+}
 PROMPTS = tuple(f"prompts/prism-{name}.md" for name in ("scan", "full", "3way", "reflect", "discover"))
 LENSES = tuple(f"reference-prisms/{name}.md" for name in ("claim", "deep_scan", "error_resilience", "identity", "l12", "optimize", "simulation"))
 REQUIRED = (
@@ -167,7 +170,8 @@ def local_link_parts(root, source, target):
         else:
             # Prevent Windows device/stream and trailing-dot/space aliases even
             # when validating on POSIX. Decode exactly once, like the OS path.
-            if ":" in part or part.endswith((".", " ")) or PureWindowsPath(part).is_reserved():
+            device = part.partition(".")[0].rstrip(" ").upper()
+            if ":" in part or part.endswith((".", " ")) or device in WINDOWS_DEVICES:
                 raise ValueError("nonportable destination component")
             depth += 1
         parts.append(part)

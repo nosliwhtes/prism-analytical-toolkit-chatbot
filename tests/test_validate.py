@@ -102,6 +102,8 @@ class ValidationTests(unittest.TestCase):
             "../outside.md", "%2e%2e/outside.md", "folder/../../outside.md",
             "folder%2F..%2F..%2Foutside.md", "..%5Coutside.md", "folder%5C..%5Coutside.md",
             "..%20/outside.md", "folder/file:stream", "NUL", "folder/CON.txt",
+            "conout$.txt", "ConIn$", "COM1", "lpt9.log", "COM%C2%B9.txt", "LPT%C2%B3",
+            "NUL%20.txt", "name.", "name%20",
             "file%00.md", "file%0A.md", "%ff.md",
         )
         # Pure path parsing establishes the Windows interpretation without
@@ -126,7 +128,7 @@ class ValidationTests(unittest.TestCase):
     def test_safe_relative_links_keep_encoded_filename_characters(self):
         docs = self.root / "docs"
         docs.mkdir()
-        for name in ("a file(1).txt", "café.txt", "hash#question?.txt", "%2Fdouble.txt"):
+        for name in ("a file(1).txt", "café.txt", "hash#question?.txt", "%2Fdouble.txt", "COM10.txt"):
             (self.root / name).write_text("harmless target", encoding="utf-8")
         (docs / "links.md").write_text(
             "[space](../a%20file(1).txt#section)\n"
@@ -134,6 +136,7 @@ class ValidationTests(unittest.TestCase):
             "[punctuation](../hash%23question%3F.txt)\n"
             "[once](../%252Fdouble.txt)\n[dir](../docs/)\n"
             "[inside](../docs/../a%20file(1).txt)\n"
+            "[ordinary](../COM10.txt)\n"
         )
         self.assertTrue(validator.validate(self.root)["ok"])
 

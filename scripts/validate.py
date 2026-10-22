@@ -64,7 +64,7 @@ def prose_only(text):
             stripped = line.rstrip("\r\n")
             paragraph = not (
                 re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", stripped) or
-                re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", stripped) or
+                (paragraph and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", stripped)) or
                 re.fullmatch(r" {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})", stripped)
             )
     return "".join(lines)

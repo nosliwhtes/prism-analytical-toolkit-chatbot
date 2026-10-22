@@ -113,6 +113,11 @@ class ValidationTests(unittest.TestCase):
                 (self.root / "links.md").write_text(prefix + "    [docs](missing.md)\n")
                 self.assertTrue(validator.validate(self.root)["ok"])
 
+    def test_setext_marker_without_heading_text_starts_a_paragraph(self):
+        (self.root / "links.md").write_text("===\n    [docs](missing.md)\n")
+        errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["detail"] for e in errors], ["missing.md"])
+
     def test_escaped_closing_bracket_in_label(self):
         (self.root / "links.md").write_text(r"[API \] notes](missing.md)" + "\n")
         errors = validator.validate(self.root)["errors"]

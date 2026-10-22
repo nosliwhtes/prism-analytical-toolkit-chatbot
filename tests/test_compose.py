@@ -21,7 +21,7 @@ class ComposeTests(unittest.TestCase):
 
     def run_cli(self, *args):
         return subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
-                              cwd=self.root, capture_output=True, text=True)
+                              cwd=self.root, capture_output=True, text=True, timeout=10)
 
     def test_complete_prompt_sources_and_provenance(self):
         other = self.root / "other.txt"
@@ -181,6 +181,31 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(run.returncode, 2, "symlink directory must not bypass source checks")
         self.assertEqual(run.stdout, "")
         self.assertNotIn("HARMLESS-PARENT-TEST-MARKER", run.stderr)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX named-pipe semantics")
+    def test_fifo_source_is_rejected_without_blocking(self):
+        fifo = self.root / "pipe.txt"
+        os.mkfifo(fifo)
+        run = self.run_cli("--artifact", fifo)
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("not a regular file", run.stderr)
+        self.assertEqual(run.stdout, "")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink semantics")
+    def test_existing_symlink_or_directory_output_is_preserved(self):
+        symlink = self.root / "bundle-link.md"
+        symlink.symlink_to(self.artifact)
+        dangling = self.root / "dangling-link.md"
+        dangling.symlink_to(self.root / "missing.txt")
+        before = set(self.root.iterdir())
+        for output in (symlink, dangling, self.root):
+            with self.subTest(output=output):
+                run = self.run_cli("--artifact", self.artifact, "--output", output)
+                self.assertEqual(run.returncode, 2, run.stderr)
+                self.assertEqual(set(self.root.iterdir()), before)
+        self.assertEqual(self.artifact.read_bytes(), b"alpha\nbeta\n")
+        self.assertTrue(symlink.is_symlink())
+        self.assertTrue(dangling.is_symlink())
 
     @unittest.skipUnless(os.name == "posix", "POSIX byte arguments")
     def test_encoding_failure_leaves_no_output_and_can_retry(self):

@@ -52,7 +52,7 @@ def prose_only(text):
             fence = marker[1]
             lines.append("\n")
             paragraph = False
-        elif not line.strip():
+        elif not line.strip(" \t\r\n"):
             lines.append(line)
             paragraph = False
         elif line.startswith(("    ", "\t")) and not paragraph:

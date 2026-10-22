@@ -107,6 +107,13 @@ class ValidationTests(unittest.TestCase):
                 errors = validator.validate(self.root)["errors"]
                 self.assertEqual([e["detail"] for e in errors], ["missing.md"])
 
+    def test_unicode_spacing_text_does_not_end_a_paragraph(self):
+        for text in ("\u00a0", "\u2003"):
+            with self.subTest(text=text):
+                (self.root / "links.md").write_text(f"Intro\n{text}\n    [docs](missing.md)\n")
+                errors = validator.validate(self.root)["errors"]
+                self.assertEqual([e["detail"] for e in errors], ["missing.md"])
+
     def test_actual_indented_code_after_block_boundary_is_ignored(self):
         for prefix in ("", "Intro\n\n", "# Heading\n", "---\n", "Title\n===\n"):
             with self.subTest(prefix=prefix):

@@ -101,7 +101,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual([e["detail"] for e in errors], ["missing6.md"])
 
     def test_indented_paragraph_continuation_is_prose(self):
-        for indent in ("    ", "\t"):
+        for indent in ("    ", "\t", " \t", "  \t", "   \t"):
             with self.subTest(indent=indent):
                 (self.root / "links.md").write_text(f"Intro\n{indent}[docs](missing.md)\n")
                 errors = validator.validate(self.root)["errors"]
@@ -116,9 +116,10 @@ class ValidationTests(unittest.TestCase):
 
     def test_actual_indented_code_after_block_boundary_is_ignored(self):
         for prefix in ("", "Intro\n\n", "# Heading\n", "---\n", "Title\n===\n"):
-            with self.subTest(prefix=prefix):
-                (self.root / "links.md").write_text(prefix + "    [docs](missing.md)\n")
-                self.assertTrue(validator.validate(self.root)["ok"])
+            for indent in ("    ", "\t", " \t", "  \t", "   \t"):
+                with self.subTest(prefix=prefix, indent=indent):
+                    (self.root / "links.md").write_text(prefix + indent + "[docs](missing.md)\n")
+                    self.assertTrue(validator.validate(self.root)["ok"])
 
     def test_setext_marker_without_heading_text_starts_a_paragraph(self):
         (self.root / "links.md").write_text("===\n    [docs](missing.md)\n")

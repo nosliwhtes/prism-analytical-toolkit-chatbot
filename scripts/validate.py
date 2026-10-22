@@ -55,7 +55,7 @@ def prose_only(text):
         elif not line.strip(" \t\r\n"):
             lines.append(line)
             paragraph = False
-        elif line.startswith(("    ", "\t")) and not paragraph:
+        elif re.match(r"^(?: {4}| {0,3}\t)", line) and not paragraph:
             lines.append("\n")
         else:
             lines.append(line)

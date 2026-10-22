@@ -40,19 +40,33 @@ def prose_only(text):
     """Ignore fenced/indented code in the supported Markdown subset."""
     lines = []
     fence = None
+    paragraph = False
     for line in text.splitlines(keepends=True):
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
         if fence:
             if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
                 fence = None
             lines.append("\n")
+            paragraph = False
         elif marker:
             fence = marker[1]
             lines.append("\n")
-        elif line.startswith(("    ", "\t")):
+            paragraph = False
+        elif not line.strip():
+            lines.append(line)
+            paragraph = False
+        elif line.startswith(("    ", "\t")) and not paragraph:
             lines.append("\n")
         else:
             lines.append(line)
+            # Indented code cannot interrupt a paragraph. Headings/thematic
+            # breaks end it, so a following indented block is still excluded.
+            stripped = line.rstrip("\r\n")
+            paragraph = not (
+                re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", stripped) or
+                re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", stripped) or
+                re.fullmatch(r" {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})", stripped)
+            )
     return "".join(lines)
 
 
@@ -96,7 +110,7 @@ def inline_targets(text):
 
     This is intentionally not a full CommonMark parser (see evaluation/README.md).
     """
-    opener = re.compile(r"\[[^\]\n]*\]\(\s*")
+    opener = re.compile(r"\[(?:\\[^\n]|[^\]\\\n])*\]\(\s*")
     for paragraph in re.split(r"\n[ \t]*\n", prose_only(text)):
         # Resolve equal-length backtick runs in advance. Scan in source order so
         # a code span can hide a link, but a destination's backticks stay literal.

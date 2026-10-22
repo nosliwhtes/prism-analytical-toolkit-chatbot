@@ -3,20 +3,48 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMPTS = ("scan", "full", "3way", "reflect", "discover")
 
 
+def open_source(path):
+    """Open every path component without following symlinks; check the read fd."""
+    if (os.open not in os.supports_dir_fd or
+            not all(hasattr(os, flag) for flag in ("O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK"))):
+        raise ValueError("secure source reads require POSIX no-follow and directory-descriptor support")
+    path = path.absolute()
+    directory_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
+    directory_fd = os.open(path.anchor, directory_flags)
+    try:
+        for component in path.parts[1:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        # NONBLOCK avoids hanging if a pathname is replaced with a FIFO.
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                     dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(f"not a regular file: {path}")
+        return os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def read_source(path, remaining):
     """Read a bounded, explicit regular file without silently truncating it."""
-    if not path.is_file():
-        raise ValueError(f"not a regular file: {path}")
     chunks = []
-    with path.open("rb") as stream:
+    with open_source(path) as stream:
         while chunk := stream.read(min(65_536, remaining + 1)):
             remaining -= len(chunk)
             if remaining < 0:
@@ -75,6 +103,23 @@ def compose(prompt, artifacts, context, focus, max_bytes):
     return "\n".join(sections)
 
 
+def write_bundle(path, bundle):
+    """Publish complete UTF-8 bytes atomically, without replacing any destination."""
+    data = bundle.encode("utf-8")  # Validate before creating even a staging file.
+    fd, temporary_name = tempfile.mkstemp(prefix=".prism-bundle-", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Same-directory hard-link publication fails atomically if any target
+        # already exists, including symlinks. Failed writes never reach this step.
+        os.link(temporary, path)
+    finally:
+        temporary.unlink()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prompt", choices=PROMPTS, default="scan")
@@ -91,9 +136,7 @@ def main(argv=None):
     try:
         bundle = compose(args.prompt, args.artifact, args.context, args.focus, args.max_bytes)
         if args.output:
-            # Exclusive creation prevents clobbering sources, existing bundles or symlink targets.
-            with args.output.open("x", encoding="utf-8", newline="\n") as stream:
-                stream.write(bundle)
+            write_bundle(args.output, bundle)
             print(f"Created {args.output}", file=sys.stderr)
         else:
             sys.stdout.write(bundle)

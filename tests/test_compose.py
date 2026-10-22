@@ -1,5 +1,6 @@
 """Exercise the offline CLI with real files; no model or network is involved."""
 import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -150,3 +151,77 @@ class ComposeTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 2)
                 self.assertIn("error:", run.stderr)
                 self.assertNotIn("Traceback", run.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink and no-follow semantics")
+    def test_symlink_sources_and_context_are_rejected(self):
+        target = self.root / "outside.txt"
+        target.write_text("HARMLESS-OUTSIDE-TEST-MARKER")
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        link = checkout / "notes.txt"
+        link.symlink_to(target)
+        for i, args in enumerate((("--artifact", link), ("--artifact", self.artifact, "--context", link))):
+            with self.subTest(args=args):
+                output = self.root / f"bundle-{i}.md"
+                run = self.run_cli(*args, "--output", output)
+                self.assertEqual(run.returncode, 2, "symlinked source must be rejected")
+                self.assertEqual(run.stdout, "")
+                self.assertNotIn("HARMLESS-OUTSIDE-TEST-MARKER", run.stderr)
+                self.assertFalse(output.exists())
+        self.assertEqual(target.read_text(), "HARMLESS-OUTSIDE-TEST-MARKER")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX symlink semantics")
+    def test_symlinked_source_parent_is_rejected(self):
+        real = self.root / "actual"
+        real.mkdir()
+        (real / "notes.txt").write_text("HARMLESS-PARENT-TEST-MARKER")
+        alias = self.root / "alias"
+        alias.symlink_to(real, target_is_directory=True)
+        run = self.run_cli("--artifact", alias / "notes.txt")
+        self.assertEqual(run.returncode, 2, "symlink directory must not bypass source checks")
+        self.assertEqual(run.stdout, "")
+        self.assertNotIn("HARMLESS-PARENT-TEST-MARKER", run.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX byte arguments")
+    def test_encoding_failure_leaves_no_output_and_can_retry(self):
+        output = self.root / "bundle.md"
+        before = set(self.root.iterdir())
+        run = self.run_cli("--artifact", self.artifact, "--focus", os.fsdecode(b"\xff"),
+                           "--output", output)
+        self.assertEqual(run.returncode, 2)
+        self.assertFalse(output.exists(), "failed encoding must not leave a bundle")
+        self.assertEqual(set(self.root.iterdir()), before)
+        retry = self.run_cli("--artifact", self.artifact, "--output", output)
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux file-size resource limit probe")
+    def test_failed_disk_write_leaves_no_output_and_can_retry(self):
+        output = self.root / "bundle.md"
+        before = set(self.root.iterdir())
+        # Limit only this child process. All input/output is generated test data.
+        probe = (
+            "import resource, runpy, signal, sys; "
+            "resource.setrlimit(resource.RLIMIT_FSIZE, (1024, 1024)); "
+            "signal.signal(signal.SIGXFSZ, signal.SIG_IGN); "
+            "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')"
+        )
+        run = subprocess.run([sys.executable, "-c", probe, str(SCRIPT), "--artifact",
+                              str(self.artifact), "--output", str(output)],
+                             cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertFalse(output.exists(), "failed write must not publish a partial bundle")
+        self.assertEqual(set(self.root.iterdir()), before)
+        retry = self.run_cli("--artifact", self.artifact, "--output", output)
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+
+    def test_concurrent_output_creation_never_overwrites(self):
+        output = self.root / "bundle.md"
+        args = [sys.executable, str(SCRIPT), "--artifact", str(self.artifact), "--output", str(output)]
+        processes = [subprocess.Popen(args, cwd=self.root, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for process in processes:
+            process.communicate(timeout=10)
+        self.assertEqual(sorted(p.returncode for p in processes), [0, 2])
+        expected = self.run_cli("--artifact", self.artifact)
+        self.assertEqual(output.read_text(), expected.stdout)
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["bundle.md", "source.txt"])

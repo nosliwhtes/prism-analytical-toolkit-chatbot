@@ -100,6 +100,20 @@ class ValidationTests(unittest.TestCase):
         errors = validator.validate(self.root)["errors"]
         self.assertEqual([e["detail"] for e in errors], ["missing6.md"])
 
+    def test_inline_code_requires_equal_length_delimiters(self):
+        (self.root / "links.md").write_text('`literal `` [docs](missing.md) tail`\n')
+        self.assertTrue(validator.validate(self.root)["ok"])
+
+    def test_escaped_backtick_does_not_hide_real_links(self):
+        (self.root / "links.md").write_text('\\`literal [docs](missing.md) tail`\n')
+        errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["detail"] for e in errors], ["missing.md"])
+
+    def test_code_spans_do_not_cross_paragraphs(self):
+        (self.root / "links.md").write_text('`unclosed\n\n[docs](missing.md) tail`\n')
+        errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["detail"] for e in errors], ["missing.md"])
+
     def test_invalid_utf8_is_a_diagnostic(self):
         for name in ("prompts/prism-scan.md", "extra.md"):
             with self.subTest(name=name):

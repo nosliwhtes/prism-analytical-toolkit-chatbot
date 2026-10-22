@@ -15,10 +15,14 @@ def read_source(path, remaining):
     """Read a bounded, explicit regular file without silently truncating it."""
     if not path.is_file():
         raise ValueError(f"not a regular file: {path}")
+    chunks = []
     with path.open("rb") as stream:
-        raw = stream.read(remaining + 1)
-    if len(raw) > remaining:
-        raise ValueError("combined source byte limit exceeded; select smaller excerpts or raise --max-bytes")
+        while chunk := stream.read(min(65_536, remaining + 1)):
+            remaining -= len(chunk)
+            if remaining < 0:
+                raise ValueError("combined source byte limit exceeded; select smaller excerpts or raise --max-bytes")
+            chunks.append(chunk)
+    raw = b"".join(chunks)
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -39,9 +43,14 @@ def source_block(source_id, path, raw, text):
     if lines[-1] == "":
         lines.pop()
     numbered = "\n".join(f"{source_id}:L{i} | {line}" for i, line in enumerate(lines, 1))
+    crlf = text.count("\r\n")
+    endings = f"LF={text.count(chr(10)) - crlf}, CRLF={crlf}, CR={text.count(chr(13)) - crlf}"
+    final_newline = "yes" if text.endswith(("\r", "\n")) else "no"
     return (f"### {source_id}\n\nName: {name}\n"
             f"SHA-256 (original bytes): {hashlib.sha256(raw).hexdigest()}\n"
-            f"Bytes: {len(raw)}; lines: {len(lines)}; version: unspecified\n\n"
+            f"Bytes: {len(raw)}; lines: {len(lines)}; version: unspecified\n"
+            f"Original line endings: {endings}; final newline: {final_newline}\n"
+            "Display normalizes CRLF/CR to LF and omits the terminal line separator.\n\n"
             f"{fence}text\n{numbered}\n{fence}\n")
 
 

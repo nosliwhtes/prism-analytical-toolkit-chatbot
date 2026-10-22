@@ -36,6 +36,37 @@ FORBIDDEN = (
 )
 
 
+def without_code_spans(text):
+    """Only equal backtick runs close a span; escaped openers stay literal."""
+    paragraphs = []
+    for paragraph in re.split(r"\n[ \t]*\n", text):
+        runs = list(re.finditer(r"`+", paragraph))
+        next_run = {}
+        closers = {}
+        for i in range(len(runs) - 1, -1, -1):
+            length = len(runs[i][0])
+            if length in next_run:
+                closers[i] = next_run[length]
+            next_run[length] = i
+        pieces = []
+        cursor = i = 0
+        while i < len(runs):
+            start = runs[i].start()
+            before = start - 1
+            while before >= 0 and paragraph[before] == "\\":
+                before -= 1
+            if (start - before - 1) % 2 or i not in closers:
+                i += 1
+                continue
+            pieces.append(paragraph[cursor:start])
+            closer = closers[i]
+            cursor = runs[closer].end()
+            i = closer + 1
+        pieces.append(paragraph[cursor:])
+        paragraphs.append("".join(pieces))
+    return "\n\n".join(paragraphs)
+
+
 def prose_only(text):
     """Ignore fenced/indented code and inline code in the supported Markdown subset."""
     lines = []
@@ -53,7 +84,7 @@ def prose_only(text):
             lines.append("\n")
         else:
             lines.append(line)
-    return re.sub(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)", "", "".join(lines), flags=re.S)
+    return without_code_spans("".join(lines))
 
 
 def inline_targets(text):

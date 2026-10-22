@@ -92,6 +92,38 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("A1:L1 | é", run.stdout)
 
+    def test_large_byte_allowance_does_not_overflow_reads(self):
+        run = self.run_cli("--artifact", self.artifact, "--max-bytes", str(2**100))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("A1:L1 | alpha", run.stdout)
+
+    def test_line_endings_and_blank_lines_keep_their_locations(self):
+        self.artifact.write_bytes("first\r\n\r\n  café\rfinal".encode("utf-8"))
+        run = self.run_cli("--artifact", self.artifact)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("A1:L1 | first\nA1:L2 | \nA1:L3 |   café\nA1:L4 | final", run.stdout)
+
+    def test_original_line_endings_and_final_newline_are_disclosed(self):
+        for data, endings, final in (
+            (b"a", "LF=0, CRLF=0, CR=0", "no"),
+            (b"a\n", "LF=1, CRLF=0, CR=0", "yes"),
+            (b"a\r\nb\rc\n", "LF=1, CRLF=1, CR=1", "yes"),
+        ):
+            with self.subTest(data=data):
+                self.artifact.write_bytes(data)
+                run = self.run_cli("--artifact", self.artifact)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertIn(f"Original line endings: {endings}; final newline: {final}", run.stdout)
+
+    def test_invalid_later_source_does_not_create_output(self):
+        bad = self.root / "bad.txt"
+        bad.write_bytes(b"\xff")
+        output = self.root / "bundle.md"
+        run = self.run_cli("--artifact", self.artifact, "--artifact", bad, "--output", output)
+        self.assertEqual(run.returncode, 2)
+        self.assertFalse(output.exists())
+        self.assertEqual(run.stdout, "")
+
     def test_output_does_not_overwrite_or_modify_inputs(self):
         run = self.run_cli("--artifact", self.artifact, "--output", self.artifact)
         self.assertEqual(run.returncode, 2)

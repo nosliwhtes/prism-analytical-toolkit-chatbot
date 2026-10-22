@@ -174,6 +174,10 @@ class ValidationTests(unittest.TestCase):
             "[https](https://example.invalid/file)\n[network](//example.invalid/file)\n"
             "[encoded](%68ttps%3A//example.invalid/file)\n"
             "[mail](mailto:someone@example.invalid)\n[file](file:///outside.md)\n[anchor](#local)\n"
+            "[external bytes](https://example.invalid/caf%E9)\n"
+            "[network bytes](//example.invalid/caf%E9)\n"
+            "[data bytes](data:application/octet-stream,%FF)\n"
+            "[external controls](https://example.invalid/file%00%0A)\n"
         )
         approved = {self.root, *self.root.rglob("*")}
         original_stat = Path.stat

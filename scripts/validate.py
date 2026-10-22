@@ -147,6 +147,13 @@ def inline_targets(text):
 
 def local_link_parts(root, source, target):
     """Classify and bound a decoded destination without filesystem operations."""
+    # Explicit external references never enter the filesystem path pipeline;
+    # their percent-encoded bytes need not be UTF-8. A one-letter scheme may be
+    # a Windows drive and must still pass the decoded local-path checks below.
+    if target.startswith(("#", "//")) or (
+            re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I) and
+            not re.match(r"^[a-z]:", target, re.I)):
+        return None
     # Split URI delimiters before decoding: %23 and %3F are filename characters.
     local = unquote(target.split("#", 1)[0].split("?", 1)[0], errors="strict")
     if any(ord(char) < 32 or ord(char) == 127 for char in local):
@@ -154,8 +161,8 @@ def local_link_parts(root, source, target):
     # A Windows drive is not an external URI scheme, including drive-relative C:x.
     if re.match(r"^[a-z]:", local, re.I):
         raise ValueError("drive-qualified destination")
-    if re.match(r"^[a-z][a-z0-9+.-]*:", local, re.I) or target.startswith(("#", "//")):
-        return None  # External URIs, explicit protocol-relative URLs and anchors.
+    if re.match(r"^[a-z][a-z0-9+.-]*:", local, re.I):
+        return None  # Encoded URI schemes also never enter the filesystem.
     if local.startswith("/") or "\\" in local:
         raise ValueError("absolute or backslash destination")
     parts = list(source.parent.relative_to(root).parts)

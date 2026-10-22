@@ -114,6 +114,15 @@ class ValidationTests(unittest.TestCase):
         errors = validator.validate(self.root)["errors"]
         self.assertEqual([e["detail"] for e in errors], ["missing.md"])
 
+    def test_backticks_in_link_destination_are_literal(self):
+        (self.root / "a`b`c.md").write_text("target")
+        (self.root / "links.md").write_text('[docs](<a`b`c.md>)\n')
+        self.assertTrue(validator.validate(self.root)["ok"])
+
+    def test_code_span_cannot_join_disconnected_link_syntax(self):
+        (self.root / "links.md").write_text('[docs]`example`(missing.md)\n')
+        self.assertTrue(validator.validate(self.root)["ok"])
+
     def test_invalid_utf8_is_a_diagnostic(self):
         for name in ("prompts/prism-scan.md", "extra.md"):
             with self.subTest(name=name):

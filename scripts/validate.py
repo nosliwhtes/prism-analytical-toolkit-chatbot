@@ -36,39 +36,8 @@ FORBIDDEN = (
 )
 
 
-def without_code_spans(text):
-    """Only equal backtick runs close a span; escaped openers stay literal."""
-    paragraphs = []
-    for paragraph in re.split(r"\n[ \t]*\n", text):
-        runs = list(re.finditer(r"`+", paragraph))
-        next_run = {}
-        closers = {}
-        for i in range(len(runs) - 1, -1, -1):
-            length = len(runs[i][0])
-            if length in next_run:
-                closers[i] = next_run[length]
-            next_run[length] = i
-        pieces = []
-        cursor = i = 0
-        while i < len(runs):
-            start = runs[i].start()
-            before = start - 1
-            while before >= 0 and paragraph[before] == "\\":
-                before -= 1
-            if (start - before - 1) % 2 or i not in closers:
-                i += 1
-                continue
-            pieces.append(paragraph[cursor:start])
-            closer = closers[i]
-            cursor = runs[closer].end()
-            i = closer + 1
-        pieces.append(paragraph[cursor:])
-        paragraphs.append("".join(pieces))
-    return "\n\n".join(paragraphs)
-
-
 def prose_only(text):
-    """Ignore fenced/indented code and inline code in the supported Markdown subset."""
+    """Ignore fenced/indented code in the supported Markdown subset."""
     lines = []
     fence = None
     for line in text.splitlines(keepends=True):
@@ -84,7 +53,42 @@ def prose_only(text):
             lines.append("\n")
         else:
             lines.append(line)
-    return without_code_spans("".join(lines))
+    return "".join(lines)
+
+
+def link_destination(text, start):
+    """Read a destination and optional title following an inline link opener."""
+    i = start
+    if i < len(text) and text[i] == "<":
+        start = i = i + 1
+        while i < len(text) and text[i] not in ">\r\n":
+            i += 2 if text[i] == "\\" else 1
+        if i >= len(text) or text[i] != ">":
+            return None
+        target = text[start:i]
+        i += 1
+    else:
+        depth = 0
+        while i < len(text):
+            char = text[i]
+            if char == "\\" and i + 1 < len(text):
+                i += 2
+                continue
+            if char.isspace() or (char == ")" and depth == 0):
+                break
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            i += 1
+        if depth:
+            return None
+        target = text[start:i]
+    # An optional title must be separated from the destination by whitespace.
+    closing = re.match(r'''(?:\s+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)))?\s*\)''', text[i:])
+    if closing:
+        return re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", target), i + closing.end()
+    return None
 
 
 def inline_targets(text):
@@ -92,37 +96,35 @@ def inline_targets(text):
 
     This is intentionally not a full CommonMark parser (see evaluation/README.md).
     """
-    text = prose_only(text)
-    for match in re.finditer(r"(?<!\\)\[[^\]\n]*\]\(\s*", text):
-        start = i = match.end()
-        if i < len(text) and text[i] == "<":
-            start = i = i + 1
-            while i < len(text) and text[i] not in ">\r\n":
-                i += 2 if text[i] == "\\" else 1
-            if i >= len(text) or text[i] != ">":
+    opener = re.compile(r"\[[^\]\n]*\]\(\s*")
+    for paragraph in re.split(r"\n[ \t]*\n", prose_only(text)):
+        # Resolve equal-length backtick runs in advance. Scan in source order so
+        # a code span can hide a link, but a destination's backticks stay literal.
+        next_run = {}
+        code_ends = {}
+        for run in reversed(list(re.finditer(r"`+", paragraph))):
+            length = len(run[0])
+            if length in next_run:
+                code_ends[run.start()] = next_run[length]
+            next_run[length] = run.end()
+        i = 0
+        while i < len(paragraph):
+            if paragraph[i] == "\\":
+                # Punctuation escapes; skipping a backslash pair leaves the
+                # following opener active, unlike a single escaping backslash.
+                i += 2
                 continue
-            target = text[start:i]
-            i += 1
-        else:
-            depth = 0
-            while i < len(text):
-                char = text[i]
-                if char == "\\" and i + 1 < len(text):
-                    i += 2
+            if i in code_ends:
+                i = code_ends[i]
+                continue
+            if paragraph[i] == "[":
+                match = opener.match(paragraph, i)
+                destination = link_destination(paragraph, match.end()) if match else None
+                if destination is not None:
+                    target, i = destination
+                    yield target
                     continue
-                if char.isspace() or (char == ")" and depth == 0):
-                    break
-                if char == "(":
-                    depth += 1
-                elif char == ")":
-                    depth -= 1
-                i += 1
-            if depth:
-                continue
-            target = text[start:i]
-        # An optional title must be separated from the destination by whitespace.
-        if re.match(r'''(?:\s+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)))?\s*\)''', text[i:]):
-            yield re.sub(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])", r"\1", target)
+            i += 1
 
 
 def validate(root):

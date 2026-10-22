@@ -3,7 +3,8 @@
 import argparse
 import json
 import re
-from pathlib import Path
+import stat
+from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,60 @@ def inline_targets(text):
             i += 1
 
 
+def local_link_parts(root, source, target):
+    """Classify and bound a decoded destination without filesystem operations."""
+    # Split URI delimiters before decoding: %23 and %3F are filename characters.
+    local = unquote(target.split("#", 1)[0].split("?", 1)[0], errors="strict")
+    if any(ord(char) < 32 or ord(char) == 127 for char in local):
+        raise ValueError("control character in local destination")
+    # A Windows drive is not an external URI scheme, including drive-relative C:x.
+    if re.match(r"^[a-z]:", local, re.I):
+        raise ValueError("drive-qualified destination")
+    if re.match(r"^[a-z][a-z0-9+.-]*:", local, re.I) or target.startswith(("#", "//")):
+        return None  # External URIs, explicit protocol-relative URLs and anchors.
+    if local.startswith("/") or "\\" in local:
+        raise ValueError("absolute or backslash destination")
+    parts = list(source.parent.relative_to(root).parts)
+    depth = len(parts)
+    for part in local.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("destination escapes pack root")
+        else:
+            # Prevent Windows device/stream and trailing-dot/space aliases even
+            # when validating on POSIX. Decode exactly once, like the OS path.
+            if ":" in part or part.endswith((".", " ")) or PureWindowsPath(part).is_reserved():
+                raise ValueError("nonportable destination component")
+            depth += 1
+        parts.append(part)
+    return parts
+
+
+def local_link_exists(root, parts):
+    """Check bounded components without following symlinks or reparse points."""
+    current = root
+    for index, part in enumerate(parts):
+        if part == "..":
+            current = current.parent
+            continue
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        if (stat.S_ISLNK(metadata.st_mode) or
+                getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise ValueError("symlink or reparse point in destination")
+        if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+            raise ValueError("destination is not a regular file or directory")
+        if index < len(parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+            return False
+    return True
+
+
 def validate(root):
     root = Path(root)
     errors = []
@@ -194,11 +249,16 @@ def validate(root):
         # Inline relative file links used by this pack. External URLs and anchors
         # are not fetched; reference-style links and heading anchors are not checked.
         for target in inline_targets(text):
-            if re.match(r"[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith(("#", "//")):
-                continue
-            local = unquote(target.split("#", 1)[0].split("?", 1)[0])
-            if not (path.parent / local).exists():
-                errors.append({"path": str(path.relative_to(root)), "rule": "broken_local_link", "detail": target})
+            try:
+                parts = local_link_parts(root, path, target)
+                if parts is None or local_link_exists(root, parts):
+                    continue
+                rule = "broken_local_link"
+            except ValueError:
+                rule = "unsafe_local_link"
+            except OSError:
+                rule = "unreadable_local_link"
+            errors.append({"path": str(path.relative_to(root)), "rule": rule, "detail": target})
     return {"ok": not errors, "prompts_checked": checked, "errors": errors,
             "scope": "Static text contracts and inline local file links; no model-quality claim."}
 

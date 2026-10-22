@@ -1,12 +1,16 @@
 """Mutation checks: demonstrate detection without modifying the working pack."""
 import importlib.util
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PureWindowsPath
 import shutil
 import tempfile
 import subprocess
 import sys
+import stat
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("validate", ROOT / "scripts/validate.py")
@@ -89,6 +93,139 @@ class ValidationTests(unittest.TestCase):
             '[remote](//example.invalid/docs)\n'
         )
         self.assertTrue(validator.validate(self.root)["ok"])
+
+    def test_unsafe_local_links_are_rejected_before_filesystem_probe(self):
+        targets = (
+            "%2F%2Fserver.invalid/share/file.md", "%2f%2fserver.invalid/share/file.md",
+            "%5C%5Cserver.invalid%5Cshare%5Cfile.md", "/absolute.md", "%2Fabsolute.md",
+            "C:/outside.md", "C:outside.md", "%43%3A%5Coutside.md", "%5Crooted.md",
+            "../outside.md", "%2e%2e/outside.md", "folder/../../outside.md",
+            "folder%2F..%2F..%2Foutside.md", "..%5Coutside.md", "folder%5C..%5Coutside.md",
+            "..%20/outside.md", "folder/file:stream", "NUL", "folder/CON.txt",
+            "file%00.md", "file%0A.md", "%ff.md",
+        )
+        # Pure path parsing establishes the Windows interpretation without
+        # instantiating a WindowsPath or contacting any network filesystem.
+        self.assertTrue(PureWindowsPath("//server.invalid/share/file.md").is_absolute())
+        original_stat = Path.stat
+        for target in targets:
+            with self.subTest(target=target):
+                (self.root / "links.md").write_text(f"[docs]({target})\n")
+                approved = {self.root, *self.root.rglob("*")}
+
+                def guarded_stat(path, *args, **kwargs):
+                    if path not in approved:
+                        self.fail(f"unapproved filesystem probe intercepted: {path}")
+                    return original_stat(path, *args, **kwargs)
+
+                with patch.object(Path, "stat", guarded_stat):
+                    errors = validator.validate(self.root)["errors"]
+                self.assertEqual(errors, [{"path": "links.md", "rule": "unsafe_local_link",
+                                           "detail": target}])
+
+    def test_safe_relative_links_keep_encoded_filename_characters(self):
+        docs = self.root / "docs"
+        docs.mkdir()
+        for name in ("a file(1).txt", "café.txt", "hash#question?.txt", "%2Fdouble.txt"):
+            (self.root / name).write_text("harmless target", encoding="utf-8")
+        (docs / "links.md").write_text(
+            "[space](../a%20file(1).txt#section)\n"
+            "[unicode](../caf%C3%A9.txt?view=1)\n"
+            "[punctuation](../hash%23question%3F.txt)\n"
+            "[once](../%252Fdouble.txt)\n[dir](../docs/)\n"
+            "[inside](../docs/../a%20file(1).txt)\n"
+        )
+        self.assertTrue(validator.validate(self.root)["ok"])
+
+    def test_nested_link_boundaries_and_nondirectory_parents(self):
+        docs = self.root / "docs"
+        docs.mkdir()
+        (self.root / "target.txt").write_text("harmless target")
+        (docs / "links.md").write_text(
+            "[escape](../../outside.txt)\n"
+            "[encoded](../%2e%2e/outside.txt)\n"
+            "[file parent](../target.txt/../target.txt)\n"
+        )
+        errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["rule"] for e in errors],
+                         ["unsafe_local_link", "unsafe_local_link", "broken_local_link"])
+
+    def test_unreadable_link_target_is_a_diagnostic(self):
+        target = self.root / "target.txt"
+        target.write_text("harmless target")
+        (self.root / "links.md").write_text("[docs](target.txt)\n")
+        original_stat = Path.stat
+
+        def guarded_stat(path, *args, **kwargs):
+            if path == target:
+                raise PermissionError("synthetic denied metadata access")
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", guarded_stat):
+            errors = validator.validate(self.root)["errors"]
+        self.assertEqual(errors, [{"path": "links.md", "rule": "unreadable_local_link",
+                                   "detail": "target.txt"}])
+
+    def test_external_links_never_probe_their_destinations(self):
+        (self.root / "links.md").write_text(
+            "[https](https://example.invalid/file)\n[network](//example.invalid/file)\n"
+            "[encoded](%68ttps%3A//example.invalid/file)\n"
+            "[mail](mailto:someone@example.invalid)\n[file](file:///outside.md)\n[anchor](#local)\n"
+        )
+        approved = {self.root, *self.root.rglob("*")}
+        original_stat = Path.stat
+
+        def guarded_stat(path, *args, **kwargs):
+            if path not in approved:
+                self.fail(f"external destination probe intercepted: {path}")
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", guarded_stat):
+            self.assertTrue(validator.validate(self.root)["ok"])
+
+    @unittest.skipUnless(os.name == "posix", "synthetic local symlink fixtures")
+    def test_link_checks_do_not_follow_symlink_components(self):
+        with tempfile.TemporaryDirectory() as outside:
+            target = Path(outside) / "target.txt"
+            target.write_text("HARMLESS TEST TARGET")
+            alias = self.root / "alias.txt"
+            alias.symlink_to(target)
+            directory = self.root / "alias-dir"
+            directory.symlink_to(outside, target_is_directory=True)
+            (self.root / "links.md").write_text(
+                "[leaf](alias.txt)\n[parent](alias-dir/target.txt)\n"
+                "[dot parent](alias-dir/../prompts/prism-scan.md)\n"
+            )
+            original_stat = Path.stat
+
+            def guarded_stat(path, *args, **kwargs):
+                if directory in path.parents or (path in (alias, directory) and
+                                                 kwargs.get("follow_symlinks", True)):
+                    self.fail(f"following symlink probe intercepted: {path}")
+                return original_stat(path, *args, **kwargs)
+
+            with patch.object(Path, "stat", guarded_stat):
+                errors = validator.validate(self.root)["errors"]
+            self.assertEqual([e["rule"] for e in errors], ["unsafe_local_link"] * 3)
+
+    def test_link_checks_reject_synthetic_windows_reparse_point(self):
+        directory = self.root / "junction"
+        directory.mkdir()
+        (self.root / "links.md").write_text("[docs](junction/file.txt)\n")
+        original_stat = Path.stat
+
+        def guarded_stat(path, *args, **kwargs):
+            if directory in path.parents:
+                self.fail("reparse-point traversal intercepted")
+            if path == directory:
+                self.assertFalse(kwargs.get("follow_symlinks", True))
+                return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755,
+                                       st_file_attributes=stat.FILE_ATTRIBUTE_REPARSE_POINT)
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", guarded_stat):
+            errors = validator.validate(self.root)["errors"]
+        self.assertEqual([e["rule"] for e in errors], ["unsafe_local_link"])
 
     def test_code_samples_are_not_links(self):
         (self.root / "links.md").write_text(

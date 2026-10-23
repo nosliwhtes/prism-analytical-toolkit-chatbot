@@ -17,4 +17,4 @@ jobs:
       - name: Test regression detection
         run: python3 -m unittest discover -s tests -v
       - name: Compile maintenance script
-        run: python3 -m py_compile scripts/validate.py
+        run: python3 -m py_compile scripts/validate.py scripts/compose.py

@@ -49,6 +49,22 @@ Send them this repo and suggest starting with:
 
 No install is required to use the Markdown prompts. Optional offline maintenance checks use only Python’s standard library.
 
+## Review multiple sources reproducibly
+
+Give each document or excerpt a label, version, and scope using the [review request template](templates/review-request.md). The analysis prompts track source coverage, cite exact evidence, distinguish conflicting versions, and keep finding IDs through corrections. See the [worked multi-source review](examples/multi-source-review.md). These instructions improve traceability; they do not guarantee a chatbot's compliance or correctness.
+
+For local UTF-8 text files, an optional Python helper creates one paste/upload bundle containing the **complete selected prompt**, numbered source lines, and SHA-256 hashes of original source bytes:
+
+```sh
+python3 scripts/compose.py --prompt full --artifact proposal.md --artifact requirements.md --context review-context.txt --focus "handoff correctness" --output review-bundle.md
+```
+
+Repeat `--artifact` in citation order. Omit `--prompt` for Scan, `--context`/`--focus` when unnecessary, and `--output` to print to stdout. Run `python3 scripts/compose.py --help` for options. The helper only reads the named sources and the selected local prompt; it makes no network/model calls, executes no source code, and refuses to overwrite an existing output. It rejects symlinks in artifact/context paths (including parent directories), non-regular files, missing, empty, non-UTF-8, and NUL-containing inputs. Its default combined source limit is 200,000 bytes, adjustable with `--max-bytes`; oversize inputs fail without truncation. This is **not** a model token/context limit: select smaller excerpts for your chatbot and record omitted parts. PDF, office documents, URLs, and images need text extraction or the chatbot's own upload support.
+
+Secure source reads require POSIX no-follow flags and directory-descriptor support (tested on Linux); unsupported systems fail with an error rather than follow links. Use real, non-symlink source paths. `--output` requires a filesystem supporting hard links: the helper writes and syncs a private staging file in the destination directory, then atomically creates the destination without replacement. Encoding, write, or close failures leave no incomplete destination and handled failures remove the staging file, so a corrected command can retry. Abrupt process termination may leave a private `.prism-bundle-*.tmp` staging file. The direct Markdown copy/paste workflow remains available on all platforms.
+
+Hashes identify bytes, not truth, authority, or document dates. The numbered display normalizes CRLF/CR to LF and omits the final line separator; metadata records original ending counts and whether a final newline was present. This is a readable review copy, not a lossless file export; use original files for byte-sensitive questions. The bundle labels unknown versions as unspecified; supply known versions in context. Review the generated bundle before sharing it: it contains the source text. Both output paths validate UTF-8 before writing, and stdout emits UTF-8 bytes regardless of the terminal encoding. Use `--output` rather than shell redirection when you need overwrite protection. Keep private bundles outside this public repository; `review-bundle*.md` and abandoned `.prism-bundle-*.tmp` staging files are ignored as a convenience.
+
 ## For Gemini
 
 With Gemini, you can either:
@@ -85,8 +101,13 @@ Run the offline checks from the repository root with Python 3.12 or newer:
 python3 scripts/validate.py --json
 python3 -m unittest discover -s tests -v
 python3 -m py_compile scripts/validate.py
+python3 -m py_compile scripts/compose.py
 ```
 
-The validator exits 0 on success and 1 on validation failures, with path/rule diagnostics. It checks known prompt-contract regressions and inline local file links, not empirical model quality. See the [evaluation fixtures and rubric](evaluation/README.md) and [maintenance guidance](AGENTS.md). No runtime packages, lockfile, application build, or model API are needed.
+The validator exits 0 on success and 1 on validation failures, with path/rule diagnostics, including malformed UTF-8. Use `--root PATH` to check a different pack. It checks known prompt-contract regressions and inline local file links (including optional titles, angle destinations, and encoded spaces), ignoring code examples. It is a documented Markdown subset, not a complete CommonMark parser or empirical model evaluation. See the [evaluation fixtures and rubric](evaluation/README.md), [implementation rationale](docs/functional-improvements.md), and [maintenance guidance](AGENTS.md). No runtime packages, lockfile, application build, or model API are needed.
+
+Link checks decode the path once before filesystem access and reject absolute/UNC paths, Windows drive/device aliases, backslashes, and traversal outside the selected pack. Relative `../` links within the pack remain supported. Destination symlinks and Windows reparse points are refused; unsafe and unreadable destinations produce diagnostics. External URI schemes, explicit protocol-relative URLs, and anchors are skipped without fetching. The selected pack must be local and stable during validation; this tool does not isolate a concurrently modified filesystem.
+
+Source discovery checks directory entries before descending and rejects symlinks/reparse points, including linked ancestors of the selected root. Only inventoried regular Markdown files can be read or contract-checked; non-regular Markdown sources receive diagnostics. Reads recheck path components and the opened file descriptor. POSIX additionally uses no-follow/nonblocking open flags where available; Windows relies on pre-open reparse checks under the same stable-tree requirement, not atomic isolation from concurrent replacement.
 
 CI uses the Python supplied on GitHub's Ubuntu 24.04 hosted runner and an immutable revision of [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1). The official [checkout documentation](https://github.com/actions/checkout) specifies Node 24 runner support inherited from v5; hosted runners meet this requirement. Dependency review: 2026-10-04. Preserve the pin and verify official release compatibility when updating it.

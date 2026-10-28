@@ -151,6 +151,11 @@ class ValidationTests(unittest.TestCase):
         self.mutate("prompts/prism-reflect.md", "Do not write files unless the user explicitly requests saving", "Always save")
         self.assertIn("missing_boundary", self.rules())
 
+    def test_findings_contract_cannot_drop_fields(self):
+        self.mutate("prompts/prism-scan.md",
+                    "| Impact/severity + rationale | Classification |", "|")
+        self.assertIn("missing_boundary", self.rules())
+
     def test_forced_conclusion(self):
         path = self.root / "prompts/prism-3way.md"
         with path.open("a") as stream:
@@ -385,6 +390,17 @@ class ValidationTests(unittest.TestCase):
         (self.root / "links.md").write_text(r"[API \] notes](missing.md)" + "\n")
         errors = validator.validate(self.root)["errors"]
         self.assertEqual([e["detail"] for e in errors], ["missing.md"])
+
+    def test_unmatched_openers_do_not_repeatedly_scan_the_remaining_document(self):
+        # Malformed text is outside supported link syntax, but must not stall
+        # validation or hide an ordinary link that follows it.
+        (self.root / "links.md").write_text("[" * 100_000 + "\n[docs](missing.md)\n")
+        run = subprocess.run([sys.executable, str(ROOT / "scripts/validate.py"),
+                              "--root", str(self.root), "--json"],
+                             capture_output=True, text=True, timeout=5)
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual(json.loads(run.stdout)["errors"],
+                         [{"path": "links.md", "rule": "broken_local_link", "detail": "missing.md"}])
 
     def test_inline_code_requires_equal_length_delimiters(self):
         (self.root / "links.md").write_text('`literal `` [docs](missing.md) tail`\n')

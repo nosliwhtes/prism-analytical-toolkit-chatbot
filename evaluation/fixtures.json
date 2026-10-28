@@ -75,5 +75,29 @@
       "Do not fabricate a replacement bug or structural constraint",
       "Keep original finding ID when recording the retraction"
     ]
+  },
+  {
+    "id": "scenario_safeguards",
+    "artifact": "A1 — arithmetic module, version 1, complete function and contract.\nContract: add accepts Python integers and returns their sum.\ndef add(a, b): return a + b\nNo external dependencies or persistent state are used by this function.",
+    "context": "Explore maintenance scenarios only within the supplied function. No usage, staffing, or performance data is provided. The function contract is available to future maintainers.",
+    "expected": [
+      "Allow no failure in a hypothetical cycle",
+      "Mark dependency-specific scenarios inapplicable unless relevant context is supplied",
+      "Consider the existing contract as a safeguard",
+      "Do not turn 10x hypothetical usage into a measured performance failure",
+      "Do not infer missing whole-system documentation from this complete function alone"
+    ]
+  },
+  {
+    "id": "linear_format",
+    "artifact": "Contract: remove exactly one nonempty suffix when present; an empty suffix must leave text unchanged.\nImplementation:\ndef strip_suffix(text, suffix):\n    if text.endswith(suffix):\n        return text[:-len(suffix)]\n    return text",
+    "context": "Use one labeled block per finding for linear reading. Keep all seven Findings contract fields and original evidence; no tools or saving are requested.",
+    "expected": [
+      "For analysis, use ID, Finding and trigger, Source/location + evidence, Status, Impact/severity + rationale, Classification, Next test or action in that order",
+      "Preserve the empty-suffix finding, exact evidence and verification step",
+      "Do not infer deployment severity from an isolated function",
+      "Discovery still returns only a numbered list of domains",
+      "No model execution or screen-reader compatibility claim without testing"
+    ]
   }
 ]

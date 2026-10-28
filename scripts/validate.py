@@ -21,7 +21,8 @@ REQUIRED = (
 )
 ANALYSIS_REQUIRED = ("Separate observations", "no structural constraint established",
                      "## Evidence and scope", "## Findings contract",
-                     "Source/location + evidence", "Next test or action")
+                     "| ID | Finding and trigger | Source/location + evidence | Status | "
+                     "Impact/severity + rationale | Classification | Next test or action |")
 DISCOVERY_REQUIRED = ("Return only a numbered list", "Do not generate lenses or findings",
                       "only exception to domain-only output")
 # Deliberately narrow regression guards for known contradictory mandates.
@@ -115,7 +116,9 @@ def inline_targets(text):
 
     This is intentionally not a full CommonMark parser (see evaluation/README.md).
     """
-    opener = re.compile(r"\[(?:\\[^\n]|[^\]\\\n])*\]\(\s*")
+    # Nested labels are outside this subset. Stop at another opener rather than
+    # rescanning every suffix of a long run of unmatched opening brackets.
+    opener = re.compile(r"\[(?:\\[^\n]|[^\[\]\\\n])*\]\(\s*")
     for paragraph in re.split(r"\n[ \t]*\n", prose_only(text)):
         # Resolve equal-length backtick runs in advance. Scan in source order so
         # a code span can hide a link, but a destination's backticks stay literal.

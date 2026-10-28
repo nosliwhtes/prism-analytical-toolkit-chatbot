@@ -8,6 +8,7 @@ Focus: [optional: correctness, handoffs, performance, etc.]
 Success criteria/contract: [what must hold, with source if known]
 Scope: [what to inspect; what is excluded]
 Constraints: [compatibility, resources, time, etc.; unknown is acceptable]
+Output presentation: [optional: findings table or one labeled block per finding; preserve all fields]
 
 Sources:
 A1 — [name], version/date [known value or unspecified], [complete or excerpt]

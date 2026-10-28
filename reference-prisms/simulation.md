@@ -26,7 +26,7 @@ For multiple sources or chunks, keep their IDs and versions distinct. Compare co
 
 ## Findings contract
 
-Use this table for analytical findings in addition to the method's lens or reasoning. Specialized details may follow, keyed by finding ID; they do not replace these fields.
+Use this table for analytical findings in addition to the method's lens or reasoning. If the user requests plain text, a narrow-screen layout, or screen-reader-friendly output, use one labeled block per finding with all seven fields below, in the same order. This alternative applies wherever the method requests a findings table. Specialized details may follow, keyed by finding ID; they do not replace these fields.
 
 | ID | Finding and trigger | Source/location + evidence | Status | Impact/severity + rationale | Classification | Next test or action |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -41,17 +41,17 @@ Execute every step below. Output the complete analysis.
 
 ## Temporal Simulation Protocol
 
-Describe five hypothetical maintenance cycles, labeling assumptions and predictions rather than treating scenarios as observations. Skip inapplicable scenarios with a reason. For each cycle, name what breaks, what calcifies, and what knowledge is lost.
+Consider the five hypothetical maintenance cycles below, labeling assumptions and predictions rather than treating scenarios as observations. Skip inapplicable scenarios with a reason. For each applicable cycle, test whether anything could fail, become difficult to change, or lose necessary context. No failure is a valid outcome. Include existing safeguards and a plausible successful outcome when testing a failure hypothesis.
 
-**Cycle 1**: A new developer joins. They must add a feature. What do they misunderstand about this code? Which assumption will they violate? What breaks?
+**Cycle 1**: A new developer joins and adds a feature. Which assumptions must they understand? Could supplied documentation, contracts, or tests prevent a mistake? Identify a failure hypothesis only where the evidence supports one.
 
-**Cycle 2**: A dependency updates with breaking changes. Which interfaces absorb the shock? Which propagate it? What emergency patches will calcify into permanent code?
+**Cycle 2**: A dependency introduces a breaking change. Which interfaces could absorb or propagate it? Could an emergency patch become hard to remove? If no relevant dependency is shown, mark the scenario inapplicable or request the missing context.
 
-**Cycle 3**: The original author leaves. What undocumented knowledge is now lost? Which design decisions become cargo cult? What becomes unfixable?
+**Cycle 3**: The original author leaves. What necessary knowledge is documented, and what might be unavailable? Do not infer that missing documentation in an excerpt means no documentation exists.
 
-**Cycle 4**: Usage grows 10x. What performance assumptions fail? Which "temporary" solutions become permanent load-bearing infrastructure?
+**Cycle 4**: Usage grows 10x. Which limits would matter under the stated workload? Identify measurements needed to test capacity; do not assume growth causes failure or invent performance numbers.
 
-**Cycle 5**: A security audit occurs. What hidden trust assumptions are exposed? Which boundaries were never boundaries?
+**Cycle 5**: A security audit occurs. Which trust assumptions and safeguards would it examine? Distinguish an untested boundary from a demonstrated weakness; an audit may confirm the existing design.
 
 ## Derive
 

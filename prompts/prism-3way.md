@@ -29,7 +29,7 @@ For multiple sources or chunks, keep their IDs and versions distinct. Compare co
 
 ## Findings contract
 
-Use this table for analytical findings in addition to the method's lens or reasoning. Specialized details may follow, keyed by finding ID; they do not replace these fields.
+Use this table for analytical findings in addition to the method's lens or reasoning. If the user requests plain text, a narrow-screen layout, or screen-reader-friendly output, use one labeled block per finding with all seven fields below, in the same order. This alternative applies wherever the method requests a findings table. Specialized details may follow, keyed by finding ID; they do not replace these fields.
 
 | ID | Finding and trigger | Source/location + evidence | Status | Impact/severity + rationale | Classification | Next test or action |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -58,10 +58,12 @@ For each layer: name what's visible, what it hides, and what it rests on. Find d
 
 ## OPERATION 2: WHEN (Temporal Simulation)
 
-Describe 3-5 hypothetical cycles of change, explicitly stating scenario assumptions, (maintenance, growth, evolution, external pressure). For each cycle:
-- What breaks?
-- What calcifies into permanent behavior that nobody questions?
-- What knowledge is lost?
+Describe 3-5 hypothetical cycles of change, explicitly stating scenario assumptions (maintenance, growth, evolution, external pressure). Skip inapplicable scenarios with a reason. For each applicable cycle:
+- What, if anything, could fail under these assumptions?
+- Could a temporary decision become difficult to change, and why?
+- Could necessary knowledge become unavailable, or is it preserved?
+
+No failure is a valid outcome. Include existing safeguards and a plausible successful outcome when testing a failure hypothesis.
 
 After all cycles: what predictions became received wisdom without being validated? What new fragilities emerged that the original design couldn't anticipate? Separate scenario predictions from observations and give tests that could falsify them.
 

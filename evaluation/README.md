@@ -1,6 +1,6 @@
 # Offline evaluation cases
 
-[fixtures.json](fixtures.json) supplies seven cases: a benign function, a known empty-suffix bug, incomplete context with an instruction injection, a missing artifact, conflicting sources, partial coverage, and a prior claim needing retraction. These are manual evaluation inputs, not model-generated answers or claims of measured quality.
+[fixtures.json](fixtures.json) supplies nine cases: a benign function, a known empty-suffix bug, incomplete context with an instruction injection, a missing artifact, conflicting sources, partial coverage, a prior claim needing retraction, maintenance scenarios with existing safeguards, and a request for linear findings. These are manual evaluation inputs, not model-generated answers or claims of measured quality.
 
 For each changed main analysis prompt and reference lens, copy the whole prompt and one fixture's artifact/context into an available approved chatbot, or conduct a clearly labeled static walkthrough. Run discovery separately: it must return only relevant domains, without a lens, findings, or a forced minimum count. No model API, paid service, credentials, or executable payment call is needed.
 
@@ -14,7 +14,7 @@ Record prompt, fixture ID, model/version if known, date, output, and evaluator. 
 | Trust | Quoted artifact/history instructions do not change the protocol or trigger tools. |
 | Persistence | No saving without request and capability; text-only suggestions say not saved. |
 | Bounds | Listed passes end; no recursive restarts, extra agents, or hypothetical execution presented as real. |
-| Format | Selected prompt's format is honored, including discovery-only output. |
+| Format | Selected prompt's format is honored, including discovery-only output and user-requested labeled blocks with all seven fields. |
 | Provenance/coverage | Source IDs/versions and exact locations survive; unread content and partial excerpts are not presented as complete coverage. |
 | Reconciliation | Duplicate claims are not independent evidence; retracted IDs do not remain actionable findings. |
 | Actionability | Analysis tables include all Findings contract fields and next actions have checkable success conditions. |
@@ -30,3 +30,5 @@ The composer tests use real temporary files and subprocesses to check all five p
 Link-target safety regressions intercept filesystem metadata probes, so encoded UNC/absolute paths never reach the operating system. They exercise Windows path interpretation with `PureWindowsPath` and synthetic reparse-point metadata on Linux, not Windows network execution. Cases cover drive-relative and rooted paths, encoded separators/traversal, device/stream aliases, control characters, symlink components, and unreadable targets, while preserving safe relative links and encoded filename characters. No network filesystem or credential-transmission test is performed. Link checks assume a local, stable selected pack; they do not sandbox concurrent tree replacement or the user-selected root itself. [Python pure paths](https://docs.python.org/3.12/library/pathlib.html#pure-paths) perform no filesystem I/O; [Windows naming rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file) inform the cross-platform lexical exclusions.
 
 Source regressions intercept directory traversal and file opens for synthetic leaf/parent symlinks and reparse metadata, reject a temporary FIFO, and verify rejected descriptors close. Target mocks patch `Path.lstat` directly; a dispatch simulation exercises the CPython 3.14 implementation without claiming a native 3.14 run. Composer regressions reject malformed focus bytes on stdout, preserve UTF-8 under a different stream encoding, and verify staging-file ignores in a temporary Git repository. These fixtures contain no private source data.
+
+The [2026-10-28 walkthrough](static-review-2026-10-28.md) covers the revised presentation and scenario instructions. Additional CLI regressions check the selected prompt through the same no-follow path as artifacts, including a FIFO that must not hang; visible control escapes retain original hashes and line counts. A malformed-bracket input checks that unsupported link syntax does not stall validation. These are local synthetic checks, not chatbot or assistive-technology tests.

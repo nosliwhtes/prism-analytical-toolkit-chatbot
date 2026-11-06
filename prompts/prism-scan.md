@@ -29,7 +29,7 @@ For multiple sources or chunks, keep their IDs and versions distinct. Compare co
 
 ## Findings contract
 
-Use this table for analytical findings in addition to the method's lens or reasoning. Specialized details may follow, keyed by finding ID; they do not replace these fields.
+Use this table for analytical findings in addition to the method's lens or reasoning. If the user requests plain text, a narrow-screen layout, or screen-reader-friendly output, use one labeled block per finding with all seven fields below, in the same order. This alternative applies wherever the method requests a findings table. Specialized details may follow, keyed by finding ID; they do not replace these fields.
 
 | ID | Finding and trigger | Source/location + evidence | Status | Impact/severity + rationale | Classification | Next test or action |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -64,7 +64,7 @@ Example: "Identify every explicit choice this artifact makes. For each, name the
 
 Example: "Extract every empirical claim this artifact embeds. For up to three claims, hypothesize that each is false and test a plausible alternative. Describe conditional consequences, which may include no failure."
 
-Example: "Run this artifact forward through 3 maintenance cycles. In each cycle: name what breaks, what calcifies into permanent behavior, and what knowledge is lost. After all cycles, test whether any trade-off recurs under the stated scenario assumptions."
+Example: "Consider this artifact through 3 hypothetical maintenance cycles. State each scenario's assumptions, then test whether anything could fail, become difficult to change, or lose necessary context. No failure or an inapplicable scenario is a valid result. After all cycles, test whether any trade-off recurs under the stated assumptions."
 
 Your lens must:
 - Be specific to what you observe in this artifact (not generic)
